@@ -1,0 +1,47 @@
+<view class="container">
+  <view class="seg" style="margin-bottom:10px">
+    <view wx:for="{{subjects}}" wx:key="key" class="seg-item {{subject === item.key ? 'on' : ''}}"
+          bindtap="onSubject" data-sub="{{item.key}}">{{item.name}}（{{item.count}}）</view>
+  </view>
+
+  <view class="filters">
+    <picker range="{{types}}" value="{{fType}}" bindchange="onType"><view class="filter-pill">{{types[fType]}} ▾</view></picker>
+    <picker range="{{diffs}}" value="{{fDiff}}" bindchange="onDiff"><view class="filter-pill">{{diffs[fDiff]}} ▾</view></picker>
+    <picker range="{{allKps}}" value="{{fKp}}" bindchange="onKp"><view class="filter-pill">{{allKps[fKp]}} ▾</view></picker>
+    <picker range="{{masteryOpts}}" value="{{fMastery}}" bindchange="onMastery"><view class="filter-pill">{{masteryOpts[fMastery]}} ▾</view></picker>
+    <picker range="{{errOpts}}" value="{{fErr}}" bindchange="onErr"><view class="filter-pill">{{errOpts[fErr]}} ▾</view></picker>
+    <picker range="{{timeOpts}}" value="{{fTime}}" bindchange="onTime"><view class="filter-pill">{{timeOpts[fTime]}} ▾</view></picker>
+    <view class="filter-pill" style="display:flex;align-items:center;gap:4px">
+      <text>只看待确认</text>
+      <switch checked="{{onlyPending}}" bindchange="onPending" style="transform:scale(.7)"/>
+    </view>
+  </view>
+
+  <view style="font-size:13px;color:#7a8194;margin-bottom:8px">共 {{list.length}} 道错题</view>
+
+  <block wx:if="{{list.length > 0}}">
+    <view class="q-item {{item.status === 'pending' ? 'pending' : ''}}" wx:for="{{list}}" wx:key="id"
+          bindtap="openDetail" data-id="{{item.id}}">
+      <view class="head">
+        <text wx:if="{{item.qnum}}" class="chip">第{{item.qnum}}题</text>
+        <text class="chip type">{{item.type}}</text>
+        <text class="chip {{item.difficulty === '简单' ? 'easy' : (item.difficulty === '较难' ? 'hard' : 'mid')}}">{{item.difficulty || '中等'}}</text>
+        <text class="badge {{item.status === 'pending' ? 'uncertain' : 'm' + (item.mastered ? 2 : (item.stage > 0 ? 1 : 0))}}">{{item.status === 'pending' ? '待确认' : (item.mastered ? '已掌握' : (item.stage > 0 ? '待复习' : '未掌握'))}}</text>
+      </view>
+      <view class="content">{{item.content || '（图片题）'}}</view>
+      <view wx:if="{{item.images.length > 0}}" style="margin-top:6px">
+        <image src="{{item.images[0]}}" mode="aspectFill" style="width:86px;height:86px;border-radius:8px;border:1px solid #e6e9f2"/>
+      </view>
+      <view class="meta">
+        <text>❌ 错 {{item.errorCount || 1}} 次</text>
+        <text>📅 {{item.firstWrongAtTxt}}</text>
+        <text>⏰ {{item.mastered ? '已完成' : (item.nextReviewAt <= today ? '今日待复习' : item.nextReviewAt + ' 复习')}}</text>
+      </view>
+    </view>
+  </block>
+  <view wx:else class="card empty">
+    <view class="big">🗂</view>
+    该筛选条件下没有错题
+    <view style="font-size:13px;margin-top:4px">换一个筛选条件，或去「上传」添加新内容</view>
+  </view>
+</view>

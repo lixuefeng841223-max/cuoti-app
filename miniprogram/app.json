@@ -1,0 +1,31 @@
+{
+  "pages": [
+    "pages/dashboard/dashboard",
+    "pages/upload/upload",
+    "pages/library/library",
+    "pages/review/review",
+    "pages/detail/detail"
+  ],
+  "window": {
+    "navigationBarTitleText": "错题管家",
+    "navigationBarBackgroundColor": "#4f6ef7",
+    "navigationBarTextStyle": "white",
+    "backgroundColor": "#f4f6fb",
+    "backgroundTextStyle": "dark"
+  },
+  "tabBar": {
+    "color": "#7a8194",
+    "selectedColor": "#4f6ef7",
+    "backgroundColor": "#ffffff",
+    "borderStyle": "black",
+    "list": [
+      { "text": "首页", "pagePath": "pages/dashboard/dashboard" },
+      { "text": "上传", "pagePath": "pages/upload/upload" },
+      { "text": "错题集", "pagePath": "pages/library/library" },
+      { "text": "复习", "pagePath": "pages/review/review" }
+    ]
+  },
+  "style": "v2",
+  "sitemapLocation": "sitemap.json",
+  "lazyCodeLoading": "requiredComponents"
+}

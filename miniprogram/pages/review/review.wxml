@@ -1,0 +1,105 @@
+<view class="container">
+  <!-- 选择复习来源 -->
+  <block wx:if="{{!started}}">
+    <view class="card">
+      <view class="card-title">✍️ 错题复习</view>
+      <view style="display:flex;gap:10px;align-items:center;background:#fff4e0;border-radius:10px;padding:10px 12px">
+        <text style="font-size:26px">⏰</text>
+        <view style="flex:1">
+          <text class="bt">今日到期：{{dueCount}} 道</text>
+          <view style="font-size:12px;color:#7a8194">复习节奏：当天 → 1天后 → 3天后 → 7天后 → 14天后 → 30天后 → 掌握</view>
+        </view>
+        <button class="btn warn sm" bindtap="startDue" disabled="{{dueCount === 0}}">开始</button>
+      </view>
+      <view class="label">按科目复习</view>
+      <view class="btn-row">
+        <button class="btn ghost sm" wx:for="{{subjects}}" wx:key="key" bindtap="startSub"
+                data-idx="{{index}}">{{item.name}}（{{item.count}}）</button>
+      </view>
+      <block wx:if="{{weakKps.length > 0}}">
+        <view class="label">按薄弱知识点复习</view>
+        <view class="btn-row">
+          <button class="btn subtle sm" wx:for="{{weakKps}}" wx:key="kp" bindtap="startKp"
+                  data-kp="{{item.kp}}">{{item.kp}}（错{{item.n}}次）</button>
+        </view>
+      </block>
+      <view class="help-note">复习时会隐藏答案；重新作答后自动批改。答对自动进入下一个复习周期，答错则当天再来一遍。</view>
+    </view>
+  </block>
+
+  <!-- 复习完成 -->
+  <block wx:elif="{{finished}}">
+    <view class="card empty">
+      <view class="big">🎉</view>
+      本轮复习完成！
+      <view style="font-size:13px;margin:4px 0 12px">{{sourceLabel}} · 共 {{queue.length}} 题</view>
+      <button class="btn" bindtap="backHome">返回首页</button>
+    </view>
+  </block>
+
+  <!-- 复习卡片 -->
+  <block wx:else>
+    <view class="review-card">
+      <view class="review-progress">
+        <text class="link" bindtap="exitSession">✕ 退出本轮</text>
+        <text>{{sourceLabel}} · {{idx + 1}} / {{queue.length}}</text>
+      </view>
+      <view style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">
+        <text class="chip subject">{{q.type}}</text>
+        <text class="chip {{q.difficulty === '简单' ? 'easy' : (q.difficulty === '较难' ? 'hard' : 'mid')}}">{{q.difficulty || '中等'}}</text>
+      </view>
+      <image wx:if="{{q.images.length > 0}}" src="{{q.images[0]}}" mode="widthFix"
+             style="width:100%;border-radius:10px;border:1px solid #e6e9f2;margin-bottom:8px"/>
+      <view class="review-q">{{q.content || '（图片题，请看原图作答）'}}</view>
+
+      <block wx:if="{{opts}}">
+        <view class="opt-btns">
+          <view class="opt-btn {{answer === item.key ? 'sel' : ''}}" wx:for="{{opts}}" wx:key="key"
+                bindtap="pickOpt" data-opt="{{item.key}}"><text class="bt">{{item.key}}.</text> {{item.text}}</view>
+        </view>
+      </block>
+      <block wx:elif="{{isJudge}}">
+        <view class="opt-btns">
+          <view class="opt-btn {{answer === '对' ? 'sel' : ''}}" bindtap="pickOpt" data-opt="对">✔ 对 / 正确 / √</view>
+          <view class="opt-btn {{answer === '错' ? 'sel' : ''}}" bindtap="pickOpt" data-opt="错">✘ 错 / 错误 / ×</view>
+        </view>
+      </block>
+      <block wx:else>
+        <view style="margin-top:12px">
+          <view class="label">写下你的答案（关键步骤/要点，多空用分号分隔）</view>
+          <textarea class="textarea" value="{{answer}}" bindinput="onAnswer" placeholder="在此作答…"/>
+        </view>
+      </block>
+
+      <view class="btn-row" wx:if="{{!answered}}">
+        <button class="btn" bindtap="submit">提交答案</button>
+        <button class="btn ghost" bindtap="showAnswer">看答案/解析</button>
+        <button class="btn ghost" bindtap="next">跳过</button>
+      </view>
+
+      <view wx:if="{{showAns && !answered}}" class="card" style="margin-top:10px;background:#fbfcff">
+        <text class="bt">标准答案：</text>{{q.standardAnswer || '未填写'}}
+        <view style="white-space:pre-wrap;margin-top:6px">{{q.analysis || '暂无解析'}}</view>
+        <view style="margin-top:6px">
+          <text class="chip kp" wx:for="{{q.knowledge}}" wx:key="*this">{{item}}</text>
+        </view>
+      </view>
+
+      <block wx:if="{{answered}}">
+        <view class="result-banner {{answered.result}}">
+          {{answered.result === 'correct' ? '✔ 正确' : (answered.result === 'wrong' ? '✘ 错误' : (answered.result === 'partial' ? '◐ 部分正确' : '? 无法判断'))}}{{answered.reason ? ' — ' + answered.reason : ''}}
+        </view>
+        <view style="font-size:13px;color:#7a8194;margin-top:6px">{{answered.note}}</view>
+        <view class="card" style="margin-top:10px;background:#fbfcff">
+          <view>✏️ <text class="bt">本次答案：</text>{{answer}}</view>
+          <view style="color:#18a058">✔ <text class="bt">标准答案：</text>{{q.standardAnswer || '未填写'}}</view>
+        </view>
+        <view class="btn-row">
+          <button class="btn" bindtap="next">{{idx + 1 >= queue.length ? '完成复习' : '下一题 →'}}</button>
+          <button class="btn ok" bindtap="markMastered">✔ 我已掌握</button>
+          <button class="btn warn" bindtap="markAgain">↺ 仍需复习</button>
+        </view>
+      </block>
+    </view>
+  </block>
+</view>

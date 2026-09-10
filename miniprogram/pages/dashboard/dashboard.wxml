@@ -1,0 +1,69 @@
+<view class="container">
+  <view class="grid-stats">
+    <view class="stat-card"><view class="num" style="color:#4f6ef7">{{stats.total}}</view><view class="lbl">总错题</view></view>
+    <view class="stat-card"><view class="num" style="color:#d97c0b">{{stats.dueCount}}</view><view class="lbl">待复习(今日)</view></view>
+    <view class="stat-card"><view class="num" style="color:#18a058">{{stats.masteredCount}}</view><view class="lbl">已掌握</view></view>
+    <view class="stat-card"><view class="num" style="color:#e8590c">{{stats.streak}}</view><view class="lbl">连续学习(天)</view></view>
+  </view>
+
+  <view class="section-title">各科情况</view>
+  <view wx:for="{{subjects}}" wx:key="key" class="card" bindtap="goLibrary" data-sub="{{item.key}}">
+    <view style="display:flex;align-items:center;gap:8px">
+      <text class="badge" style="background:{{item.weak}};color:{{item.color}}">{{item.name}}</text>
+      <text style="margin-left:auto;font-size:13px;color:#7a8194">错题 <text class="bt" style="color:{{item.color}}">{{item.count}}</text> 道</text>
+    </view>
+    <view style="font-size:12px;color:#7a8194;margin-top:6px">做题正确率：{{item.accTxt}}</view>
+    <view class="bar-track"><view class="bar-fill" style="width:{{item.acc || 0}}%;background:{{item.color}}"></view></view>
+  </view>
+
+  <view wx:if="{{stats.dueCount > 0}}" class="card" style="border:1px solid #d97c0b;background:#fff4e0;display:flex;align-items:center;gap:10px">
+    <text style="font-size:30px">⏰</text>
+    <view style="flex:1">
+      <text class="bt">今日有 {{stats.dueCount}} 道错题到期待复习</text>
+      <view style="font-size:12px;color:#7a8194">复习可以加深记忆，坚持就是胜利！</view>
+    </view>
+    <button class="btn warn sm" bindtap="goReview">开始复习</button>
+  </view>
+
+  <view class="section-title">最近 7 天新增错题</view>
+  <view class="card">
+    <view class="bars">
+      <view class="b" wx:for="{{days}}" wx:key="*this">
+        <view class="bar" style="height:{{dayCounts[index]}}px"></view>
+        <text>{{item}}</text>
+      </view>
+    </view>
+  </view>
+
+  <block wx:if="{{stats.topKps.length > 0}}">
+    <view class="section-title">高频错误知识点</view>
+    <view class="card">
+      <view class="kp-row" wx:for="{{stats.topKps}}" wx:key="index">
+        <text class="chip kp">{{item[0]}}</text>
+        <text class="n">错 {{item[1]}} 次</text>
+      </view>
+    </view>
+  </block>
+
+  <view class="section-title">最近新增错题</view>
+  <block wx:if="{{stats.recent.length > 0}}">
+    <view class="q-item" wx:for="{{stats.recent}}" wx:key="id" bindtap="openDetail" data-id="{{item.id}}">
+      <view class="head">
+        <text class="chip subject" style="background:{{subjectMap[item.subject].weak}};color:{{subjectMap[item.subject].color}}">{{subjectMap[item.subject].name}}</text>
+        <text class="chip type">{{item.type}}</text>
+        <text class="chip {{item.difficulty === '简单' ? 'easy' : (item.difficulty === '较难' ? 'hard' : 'mid')}}">{{item.difficulty || '中等'}}</text>
+        <text class="badge {{item.status === 'pending' ? 'uncertain' : 'm' + (item.mastered ? 2 : (item.stage > 0 ? 1 : 0))}}">{{item.status === 'pending' ? '待确认' : (item.mastered ? '已掌握' : (item.stage > 0 ? '待复习' : '未掌握'))}}</text>
+      </view>
+      <view class="content">{{item.content || '（图片题）'}}</view>
+      <view class="meta">
+        <text>❌ 错 {{item.errorCount || 1}} 次</text>
+        <text>⏰ {{item.mastered ? '已完成' : (item.nextReviewAt <= today ? '今日待复习' : item.nextReviewAt + ' 复习')}}</text>
+      </view>
+    </view>
+  </block>
+  <view wx:else class="card empty">
+    <view class="big">📖</view>
+    还没有错题记录
+    <view style="font-size:13px;margin-top:4px">点击底部「上传」，拍照或输入题目即可开始</view>
+  </view>
+</view>

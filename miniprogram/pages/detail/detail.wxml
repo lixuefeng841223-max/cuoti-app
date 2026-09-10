@@ -1,0 +1,95 @@
+<view class="container" wx:if="{{q}}">
+  <view class="card">
+    <view style="display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+      <text class="chip subject">{{q.type}}</text>
+      <text wx:if="{{q.qnum}}" class="chip">第{{q.qnum}}题</text>
+      <text class="chip {{q.difficulty === '简单' ? 'easy' : (q.difficulty === '较难' ? 'hard' : 'mid')}}">{{q.difficulty || '中等'}}</text>
+      <text class="badge {{q.status === 'pending' ? 'uncertain' : 'm' + (q.mastered ? 2 : (q.stage > 0 ? 1 : 0))}}">{{q.status === 'pending' ? '待人工确认' : (q.mastered ? '已掌握' : (q.stage > 0 ? '待复习' : '未掌握'))}}</text>
+    </view>
+    <view style="margin-top:10px">
+      <image wx:for="{{q.images}}" wx:key="*this" src="{{item}}" mode="widthFix"
+             style="width:100%;border-radius:10px;border:1px solid #e6e9f2;margin:6px 0" bindtap="previewImg" data-url="{{item}}"/>
+    </view>
+    <view class="review-q" style="margin-top:6px">{{q.content || '（图片题，请看上方原图）'}}</view>
+    <view wx:if="{{q.options.length > 0}}" style="margin-top:8px;font-size:14px">
+      <view wx:for="{{q.options}}" wx:key="key"><text class="bt">{{item.key}}.</text> {{item.text}}</view>
+    </view>
+  </view>
+
+  <view class="card" style="background:#fbfcff">
+    <view>✏️ <text class="bt">我的答案：</text>{{q.studentAnswer || '—'}}</view>
+    <view style="color:#18a058">✔ <text class="bt">标准答案：</text>{{q.standardAnswer || '待补充（点击“编辑”填写后可重新批改）'}}</view>
+    <view wx:if="{{q.status === 'pending'}}" style="margin-top:4px"><text class="badge uncertain">待人工确认</text></view>
+  </view>
+
+  <view class="card">
+    <view style="white-space:pre-wrap;font-size:14px">{{q.analysis || ''}}</view>
+    <view wx:if="{{q.knowledge.length > 0}}" style="margin-top:8px">
+      <text class="chip kp" wx:for="{{q.knowledge}}" wx:key="*this">{{item}}</text>
+    </view>
+    <view style="font-size:12px;color:#7a8194;margin-top:10px;display:flex;gap:10px;flex-wrap:wrap">
+      <text>❌ 错 {{q.errorCount || 1}} 次</text>
+      <text>🕐 最近复习：{{q.lastReviewAtTxt || '未复习'}}</text>
+      <text>⏰ 下次复习：{{q.mastered ? '已完成' : q.nextReviewAt}}</text>
+    </view>
+  </view>
+
+  <block wx:if="{{historyTail.length > 1}}">
+    <view class="card">
+      <view class="card-title">做题记录</view>
+      <view style="font-size:12px;color:#7a8194;border-left:2px solid #e6e9f2;padding-left:10px">
+        <view wx:for="{{historyTail}}" wx:key="index" style="margin:4px 0">{{item.timeTxt}} · {{item.resultTxt}}{{item.note ? ' · ' + item.note : ''}}</view>
+      </view>
+    </view>
+  </block>
+
+  <!-- 编辑模式 -->
+  <view class="card" wx:if="{{editing}}">
+    <view class="card-title">✏️ 编辑错题</view>
+    <view class="label">题目内容</view>
+    <textarea class="textarea" value="{{edit.content}}" bindinput="onEditField" data-f="content"/>
+    <view class="row2" style="margin-top:4px">
+      <view class="col"><view class="label">我的答案</view><input class="input" value="{{edit.studentAnswer}}" bindinput="onEditField" data-f="studentAnswer"/></view>
+      <view class="col"><view class="label">标准答案</view><input class="input" value="{{edit.standardAnswer}}" bindinput="onEditField" data-f="standardAnswer"/></view>
+    </view>
+    <view class="row2" style="margin-top:4px">
+      <view class="col"><view class="label">题型</view>
+        <picker range="{{types}}" value="{{typeIdx}}" bindchange="onEditType"><view class="filter-pill">{{types[typeIdx]}} ▾</view></picker></view>
+      <view class="col"><view class="label">难度</view>
+        <picker range="{{diffs}}" value="{{diffIdx}}" bindchange="onEditDiff"><view class="filter-pill">{{diffs[diffIdx]}} ▾</view></picker></view>
+    </view>
+    <view class="label">知识点（顿号分隔）</view>
+    <input class="input" value="{{edit.knowledge}}" bindinput="onEditField" data-f="knowledge"/>
+    <view class="label">关键词/要点（顿号分隔，主观题判分用）</view>
+    <input class="input" value="{{edit.keywords}}" bindinput="onEditField" data-f="keywords"/>
+    <view class="label">错误原因 / 解析</view>
+    <textarea class="textarea" style="min-height:100px" value="{{edit.analysis}}" bindinput="onEditField" data-f="analysis"/>
+    <view class="btn-row">
+      <button class="btn" bindtap="saveEdit">保存</button>
+      <button class="btn subtle" bindtap="cancelEdit">取消</button>
+    </view>
+  </view>
+
+  <!-- 重新作答 -->
+  <view class="card" wx:if="{{redoMode}}">
+    <view class="card-title">✍️ 重新作答</view>
+    <textarea class="textarea" value="{{redoAnswer}}" bindinput="onRedoAnswer" placeholder="在此写下新的答案…"/>
+    <view class="btn-row"><button class="btn" bindtap="submitRedo">提交</button></view>
+    <block wx:if="{{redoResult}}">
+      <view class="result-banner {{redoResult.result}}">{{redoResult.resultTxt}}{{redoResult.reason ? ' — ' + redoResult.reason : ''}}</view>
+      <view class="card" style="margin-top:8px;background:#fbfcff">
+        <view style="color:#18a058">✔ <text class="bt">标准答案：</text>{{q.standardAnswer || '未填写'}}</view>
+        <view style="white-space:pre-wrap;margin-top:4px">{{q.analysis || ''}}</view>
+      </view>
+    </block>
+  </view>
+
+  <view class="btn-row" style="margin-bottom:20px">
+    <button class="btn" bindtap="toggleRedo">✍️ 重新作答</button>
+    <button class="btn ok" bindtap="markMastered">✔ 已掌握</button>
+    <button class="btn warn" bindtap="markReview">↺ 仍需复习</button>
+    <button class="btn ghost" bindtap="genSimilar">🎲 类似题</button>
+    <button class="btn ghost" bindtap="startEdit">编辑</button>
+    <button class="btn danger" bindtap="delQuestion">删除</button>
+  </view>
+</view>

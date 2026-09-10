@@ -1,0 +1,114 @@
+<view class="container">
+  <view class="card">
+    <view class="card-title">📷 上传做题情况</view>
+    <view class="label">科目{{guessed ? '（已自动推测，可修改）' : ''}}</view>
+    <view class="seg">
+      <view wx:for="{{subjects}}" wx:key="key" class="seg-item {{subject === item.key ? 'on' : ''}}"
+            bindtap="onSubject" data-sub="{{item.key}}">{{item.name}}{{guessed === item.key ? ' 🔮' : ''}}</view>
+    </view>
+    <view class="seg" style="margin-top:12px">
+      <view class="seg-item {{mode === 'photo' ? 'on' : ''}}" bindtap="onMode" data-m="photo">拍照 / 图片上传</view>
+      <view class="seg-item {{mode === 'text' ? 'on' : ''}}" bindtap="onMode" data-m="text">文字输入</view>
+    </view>
+
+    <!-- 图片模式 -->
+    <block wx:if="{{mode === 'photo'}}">
+      <view style="margin-top:12px">
+        <view class="upzone">
+          <view class="big">📸</view>
+          <text class="bt">拍照或选择图片</text>
+          <view style="font-size:12px;margin-top:4px">支持题目截图、试卷照片、作业照片、手写答案</view>
+        </view>
+        <view class="btn-row">
+          <button class="btn ghost sm" bindtap="chooseFromCamera">📷 拍照</button>
+          <button class="btn ghost sm" bindtap="chooseFromAlbum">🖼 从相册选择</button>
+        </view>
+        <view style="margin-top:10px">
+          <view class="thumb" wx:for="{{images}}" wx:key="id">
+            <image src="{{item.path}}" mode="aspectFill" bindtap="previewImage" data-url="{{item.path}}"/>
+            <view class="rm" catchtap="removeImage" data-id="{{item.id}}">✕</view>
+          </view>
+        </view>
+        <button class="btn block" bindtap="recognize">开始识别</button>
+      </view>
+    </block>
+
+    <!-- 文字模式 -->
+    <block wx:else>
+      <view style="margin-top:12px">
+        <view class="label">粘贴或输入试卷 / 作业 / 答案文本</view>
+        <textarea class="textarea" style="min-height:180px" value="{{text}}" bindinput="onText"
+                  placeholder="1. 下列说法正确的是（  ）&#10;A. …  B. …  C. …  D. …&#10;2. 计算：3x + 5 = 20&#10;&#10;我的答案：1-2 AC&#10;标准答案：1-2 AB"></textarea>
+        <view class="help-note">支持写法：题号开头自动分题；「我的答案：」「标准答案：」单独成行或行内；支持「1-5 BBACA」连写。科目和题型会自动推测，识别后可逐题修改。</view>
+        <button class="btn block" style="margin-top:10px" bindtap="recognize">开始识别</button>
+      </view>
+    </block>
+  </view>
+
+  <!-- 识别结果确认 -->
+  <block wx:if="{{items.length > 0 && !graded}}">
+    <view class="section-title">识别结果确认（共 {{items.length}} 题）</view>
+    <view class="item-editor" wx:for="{{items}}" wx:key="index" wx:for-item="it" wx:for-index="idx">
+      <view class="head">
+        <input class="input" style="width:90px;padding:4px 8px" value="{{it.qnum}}" bindinput="onItemField"
+               data-idx="{{idx}}" data-f="qnum" placeholder="题号"/>
+        <picker range="{{types}}" bindchange="onItemType" data-idx="{{idx}}">
+          <view class="filter-pill">{{it.type}} ▾</view>
+        </picker>
+        <picker range="{{diffs}}" bindchange="onItemDiff" data-idx="{{idx}}">
+          <view class="filter-pill">{{it.difficulty}} ▾</view>
+        </picker>
+        <button class="btn subtle sm" style="margin-left:auto" bindtap="onItemDel" data-idx="{{idx}}">删除本题</button>
+      </view>
+      <view class="label">题目内容（图片题可留空，图片会保存）</view>
+      <textarea class="textarea" value="{{it.content}}" bindinput="onItemField" data-idx="{{idx}}" data-f="content" placeholder="题干文本…"></textarea>
+      <view class="row2" style="margin-top:4px">
+        <view class="col"><view class="label">我的答案</view>
+          <input class="input" value="{{it.studentAnswer}}" bindinput="onItemField" data-idx="{{idx}}" data-f="studentAnswer" placeholder="如 B / 对 / 3.5"/></view>
+        <view class="col"><view class="label">标准答案</view>
+          <input class="input" value="{{it.standardAnswer}}" bindinput="onItemField" data-idx="{{idx}}" data-f="standardAnswer" placeholder="留空则判为待确认"/></view>
+      </view>
+      <view class="row2" style="margin-top:4px">
+        <view class="col"><view class="label">知识点（顿号分隔）</view>
+          <input class="input" value="{{it.knowledge}}" bindinput="onItemField" data-idx="{{idx}}" data-f="knowledge" placeholder="如：一元一次方程"/></view>
+        <view class="col"><view class="label">关键词/要点（顿号分隔）</view>
+          <input class="input" value="{{it.keywords}}" bindinput="onItemField" data-idx="{{idx}}" data-f="keywords" placeholder="主观题判分要点"/></view>
+      </view>
+    </view>
+
+    <view class="card">
+      <text class="bt">批量批改并归档</text>
+      <view style="font-size:13px;color:#7a8194;margin:4px 0 8px">批改后：错误 / 部分正确的题目自动进入错题集（重复题自动合并）；无法判断的进入「待确认」。</view>
+      <button class="btn block" bindtap="gradeAll">✅ 开始批改</button>
+    </view>
+  </block>
+
+  <!-- 批改结果 -->
+  <block wx:if="{{graded}}">
+    <view class="section-title">批改结果</view>
+    <view class="card">
+      <view class="grid-stats">
+        <view class="stat-card"><view class="badge wrong" style="font-size:18px;padding:8px">{{summary.wrong}}</view><view class="lbl">错误</view></view>
+        <view class="stat-card"><view class="badge partial" style="font-size:18px;padding:8px">{{summary.partial}}</view><view class="lbl">部分正确</view></view>
+        <view class="stat-card"><view class="badge correct" style="font-size:18px;padding:8px">{{summary.correct}}</view><view class="lbl">正确</view></view>
+        <view class="stat-card"><view class="badge uncertain" style="font-size:18px;padding:8px">{{summary.uncertain}}</view><view class="lbl">待确认</view></view>
+      </view>
+      <view class="btn-row">
+        <button class="btn" bindtap="goLibrary">📚 查看错题集</button>
+        <button class="btn ghost" bindtap="again">再传一份</button>
+      </view>
+    </view>
+    <view class="q-item {{item.grade.result === 'uncertain' ? 'pending' : ''}}" wx:for="{{results}}" wx:key="index">
+      <view class="head">
+        <text wx:if="{{item.it.qnum}}" class="chip">第{{item.it.qnum}}题</text>
+        <text class="chip type">{{item.it.type}}</text>
+        <text class="badge {{item.grade.result}}">{{item.grade.result === 'correct' ? '✔ 正确' : (item.grade.result === 'wrong' ? '✘ 错误' : (item.grade.result === 'partial' ? '◐ 部分正确' : '? 无法判断'))}}</text>
+        <text wx:if="{{item.merged}}" class="chip" style="background:#fff0e6;color:#e8590c">↺ 已合并到已有错题</text>
+      </view>
+      <view class="content">{{item.it.content || '（图片题）'}}</view>
+      <view wx:if="{{item.grade.reason}}" style="font-size:13px;color:#e5484d;margin-top:4px">{{item.grade.reason}}</view>
+    </view>
+  </block>
+
+  <view class="help-note">💡 图片保存在小程序本地文件目录；文字输入支持整份试卷文本粘贴，自动识别题号、题型、选项和答案区段。</view>
+</view>

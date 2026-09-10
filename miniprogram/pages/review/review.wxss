@@ -1,0 +1,8 @@
+/* 复习页页面级样式（大部分复用 app.wxss） */
+.link {
+  font-size: 12px;
+  color: #7a8194;
+  padding: 2px 8px;
+  border: 1px solid #e6e9f2;
+  border-radius: 12px;
+}

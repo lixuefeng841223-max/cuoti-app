@@ -1,0 +1,17 @@
+{
+  "name": "错题管家 · 家庭错题管理",
+  "short_name": "错题管家",
+  "description": "面向初中生的家庭错题管理系统：拍照上传、自动识别、自动批改、错题归档、间隔重复复习与统计。",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#f4f6fb",
+  "theme_color": "#4f6ef7",
+  "orientation": "portrait-primary",
+  "scope": "./",
+  "lang": "zh-CN",
+  "icons": [
+    { "src": "./icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "./icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ],
+  "categories": ["education", "productivity"]
+}

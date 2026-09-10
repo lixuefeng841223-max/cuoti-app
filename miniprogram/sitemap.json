@@ -1,0 +1,4 @@
+{
+  "desc": "错题管家",
+  "rules": [{ "action": "allow", "page": "*" }]
+}
