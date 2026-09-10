@@ -2,13 +2,18 @@
 # 一键把当前目录推送到 GitHub 仓库 cuoti-app（自动创建仓库 + 开启 Pages）
 #
 # 用法：
-#   ./push-to-github.sh                # 交互式输入用户名和 Token
-#   GH_USER=xxx GH_TOKEN=yyy ./push-to-github.sh
+#   ./push-to-github.sh                 # 交互式输入 Token，用户名自动识别
+#   GH_TOKEN=xxx ./push-to-github.sh    # 直接给 Token
 #
-# Token 获取：https://github.com/settings/tokens
-#   经典 Token：勾选 repo（公开+私有仓库读写）即可
-#   Fine-grained Token：Repository access 选 All repositories，
-#     Permissions -> Contents: Read and write，Administration: Read and write
+# Token 获取（推荐 classic，一个勾就够）：
+#   https://github.com/settings/tokens -> Generate new token (classic)
+#   Note 填 cuoti-deploy，Expiration 选 90 days，勾选 "repo" 整个大项，生成
+#
+# 如用 fine-grained token，必须同时满足：
+#   Repository access: All repositories
+#   Permissions -> Administration: Read and write   （建仓库）
+#   Permissions -> Contents:       Read and write   （推代码）
+#   Permissions -> Pages:          Read and write   （开 Pages）
 #
 # Token 只用于本次推送，脚本不会把它写进仓库或全局配置。
 
@@ -16,48 +21,59 @@ set -euo pipefail
 
 REPO_NAME="cuoti-app"
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+API="https://api.github.com"
 
-GH_USER="${GH_USER:-}"
 GH_TOKEN="${GH_TOKEN:-}"
-
-if [ -z "$GH_USER" ]; then
-  read -r -p "GitHub 用户名: " GH_USER
-fi
 if [ -z "$GH_TOKEN" ]; then
   read -r -s -p "GitHub Token (输入时不显示): " GH_TOKEN
   echo
 fi
 
-API="https://api.github.com"
+AUTH=(-H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json")
 
-echo "==> 1/4 校验 Token"
-curl -sS -H "Authorization: Bearer $GH_TOKEN" "$API/user" | grep -q '"login"' \
-  || { echo "Token 无效或网络不通"; exit 1; }
+echo "==> 1/5 校验 Token 并识别用户名"
+GH_USER=$(curl -sS "${AUTH[@]}" "$API/user" | python3 -c "import sys,json;print(json.load(sys.stdin).get('login',''))")
+if [ -z "$GH_USER" ]; then
+  echo "Token 无效或网络不通"; exit 1
+fi
+echo "    用户名: $GH_USER"
 
-echo "==> 2/4 创建仓库 $GH_USER/$REPO_NAME（若已存在则跳过）"
-curl -sS -X POST "$API/user/repos" \
-  -H "Authorization: Bearer $GH_TOKEN" \
-  -H "Accept: application/vnd.github+json" \
-  -d "{\"name\":\"$REPO_NAME\",\"private\":false,\"has_issues\":true,\"has_wiki\":false,\"description\":\"错题管家 · 家庭错题管理系统（Web PWA + 微信小程序）\"}" \
-  | head -c 300
-echo
+echo "==> 2/5 创建仓库 $GH_USER/$REPO_NAME（已存在则跳过）"
+CODE=$(curl -sS -o /tmp/gh_create_repo.json -w '%{http_code}' -X POST "$API/user/repos" "${AUTH[@]}" \
+  -d "{\"name\":\"$REPO_NAME\",\"description\":\"错题管家 · 家庭错题管理系统（Web PWA + 微信小程序）\",\"private\":false,\"has_issues\":true,\"has_wiki\":false,\"has_projects\":false,\"auto_init\":false}")
+if [ "$CODE" = "201" ]; then
+  echo "    已创建"
+elif [ "$CODE" = "422" ]; then
+  echo "    仓库已存在，继续"
+else
+  echo "    创建失败 (HTTP $CODE)："
+  cat /tmp/gh_create_repo.json
+  echo
+  echo "    -> 多半是 Token 少了 administration=write 权限，见脚本头部说明"
+  exit 1
+fi
 
-echo "==> 3/4 推送代码"
+echo "==> 3/5 推送代码"
 cd "$PROJECT_DIR"
 git remote remove origin 2>/dev/null || true
 git remote add origin "https://${GH_USER}:${GH_TOKEN}@github.com/${GH_USER}/${REPO_NAME}.git"
 git push -u origin main
 
-echo "==> 4/4 开启 GitHub Pages（从 GitHub Actions 发布）"
-curl -sS -X POST "$API/repos/$GH_USER/$REPO_NAME/pages" \
-  -H "Authorization: Bearer $GH_TOKEN" \
-  -H "Accept: application/vnd.github+json" \
-  -d '{"build_type":"workflow"}' | head -c 300
-echo
+echo "==> 4/5 开启 GitHub Pages（从 GitHub Actions 发布）"
+CODE=$(curl -sS -o /tmp/gh_pages.json -w '%{http_code}' -X POST "$API/repos/$GH_USER/$REPO_NAME/pages" "${AUTH[@]}" \
+  -d '{"build_type":"workflow"}')
+if [ "$CODE" = "201" ] || [ "$CODE" = "409" ]; then
+  echo "    OK"
+else
+  echo "    HTTP $CODE — 可能少 pages=write 权限；可稍后在仓库 Settings -> Pages 手动选 'GitHub Actions'"
+  cat /tmp/gh_pages.json 2>/dev/null | head -c 200; echo
+fi
+rm -f /tmp/gh_create_repo.json /tmp/gh_pages.json
 
-# 推掉带 Token 的 remote，避免明文凭据留在 .git/config
+echo "==> 5/5 清理 remote 中的凭据"
 git remote set-url origin "https://github.com/${GH_USER}/${REPO_NAME}.git"
+git remote -v
 
 echo
-echo "完成。稍等 1-2 分钟，访问：https://${GH_USER}.github.io/${REPO_NAME}/"
-echo "Actions 进度：https://github.com/${GH_USER}/${REPO_NAME}/actions"
+echo "完成。等 1-2 分钟后访问：https://${GH_USER}.github.io/${REPO_NAME}/"
+echo "Actions 构建进度：https://github.com/${GH_USER}/${REPO_NAME}/actions"
