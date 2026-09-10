@@ -5,11 +5,9 @@
 
 ## 在线访问（GitHub Pages）
 
-部署完成后访问：
+**已上线：<https://lixuefeng841223-max.github.io/cuoti-app/>**
 
-```
-https://<你的 GitHub 用户名>.github.io/cuoti-app/
-```
+仓库地址：<https://github.com/lixuefeng841223-max/cuoti-app>
 
 手机浏览器打开后可「添加到主屏幕」，即可当作 App 使用（已内置 PWA 支持，可离线打开）。
 
@@ -35,7 +33,6 @@ cuoti-app/
 ├── sw.js                     # Service Worker（离线缓存）
 ├── icons/                    # 应用图标 180 / 192 / 512
 ├── .nojekyll                 # 关闭 Jekyll，保证静态资源原样发布
-├── .github/workflows/pages.yml  # GitHub Pages 自动部署工作流
 └── miniprogram/              # 微信小程序版（同一套业务逻辑）
     ├── project.config.json
     ├── app.js / app.json / app.wxss
@@ -67,8 +64,13 @@ python3 -m http.server 8080
 
 ## 部署说明
 
-推送到 `main` 分支后，GitHub Actions 会自动把根目录发布到 GitHub Pages。
-若仓库尚未开启 Pages，请在 **Settings → Pages → Build and deployment → Source** 选择 **GitHub Actions**。
+本仓库 Pages 采用**分支部署**：`Settings → Pages → Build and deployment → Source` 为
+`Deploy from a branch`，分支 `main`、目录 `/(root)`。因此**推送到 main 即自动重新发布**，无需 Actions。
+
+根目录的 `.nojekyll` 会让 GitHub 原样发布静态文件，不经过 Jekyll 处理。
+
+> 说明：若改用 GitHub Actions 工作流发布，需要 Token 具备 `workflow` 权限，普通 `repo` 权限的
+> token 无法推送 `.github/workflows/` 下的文件，故本项目采用更简单的分支部署方式。
 
 ## License
 

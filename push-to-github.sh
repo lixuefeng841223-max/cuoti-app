@@ -15,6 +15,10 @@
 #   Permissions -> Contents:       Read and write   （推代码）
 #   Permissions -> Pages:          Read and write   （开 Pages）
 #
+# 注意：classic token 勾 "repo" 即可；若仓库里含有 .github/workflows/ 下的文件，
+#       还需要额外勾 "workflow" 权限，否则推送会被 GitHub 拒绝。本项目不含工作流，
+#       Pages 走「分支部署」，因此 "repo" 一个勾就够。
+#
 # Token 只用于本次推送，脚本不会把它写进仓库或全局配置。
 
 set -euo pipefail
@@ -59,13 +63,13 @@ git remote remove origin 2>/dev/null || true
 git remote add origin "https://${GH_USER}:${GH_TOKEN}@github.com/${GH_USER}/${REPO_NAME}.git"
 git push -u origin main
 
-echo "==> 4/5 开启 GitHub Pages（从 GitHub Actions 发布）"
+echo "==> 4/5 开启 GitHub Pages（从 main 分支发布）"
 CODE=$(curl -sS -o /tmp/gh_pages.json -w '%{http_code}' -X POST "$API/repos/$GH_USER/$REPO_NAME/pages" "${AUTH[@]}" \
-  -d '{"build_type":"workflow"}')
+  -d '{"source":{"branch":"main","path":"/"}}')
 if [ "$CODE" = "201" ] || [ "$CODE" = "409" ]; then
   echo "    OK"
 else
-  echo "    HTTP $CODE — 可能少 pages=write 权限；可稍后在仓库 Settings -> Pages 手动选 'GitHub Actions'"
+  echo "    HTTP $CODE — 可稍后在仓库 Settings -> Pages 手动把 Source 选为 'Deploy from a branch: main / (root)'"
   cat /tmp/gh_pages.json 2>/dev/null | head -c 200; echo
 fi
 rm -f /tmp/gh_create_repo.json /tmp/gh_pages.json
