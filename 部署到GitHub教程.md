@@ -58,17 +58,24 @@ GitHub 连接器已经显示「已连接」，但当前这轮对话开始时它�
 
 ## 方案 C：用 Token 让 AI 帮你推（需要命令行）
 
+> ⚠️ **一定要用 classic token，不要用 fine-grained（细粒度）token。**
+> 细粒度 token 要跑通这套流程，必须同时满足 3 个条件，少一个就卡住：
+> ① Repository access 选 **All repositories**（选了 Selected / Public 就不行）
+> ② 权限 **Administration: Read and write**（用来建仓库）
+> ③ 权限 **Contents: Read and write**（用来推代码）
+> 而 classic token 只勾一个 **`repo`** 就全覆盖，不容易出错。
+
 ### 第 1 步：生成 Token
 1. 打开 https://github.com/settings/tokens
-2. 点 **Generate new token** → 选 **Generate new token (classic)**
-3. **Note** 填 `cuoti-deploy`，**Expiration** 选 30 days
-4. 勾选 **repo**（第一个大项，勾了它下面的子项会自动全勾）
+2. 点 **Generate new token** → 一定选 **Generate new token (classic)**
+   （不要点下面那个 "fine-grained token"）
+3. **Note** 填 `cuoti-deploy`，**Expiration** 选 30 days 或 90 days
+4. 勾选 **`repo`** 这一个大项（勾了它，下面 5 个子项会自动全勾上）
 5. 拉到最下面点 **Generate token**
-6. 复制那串 `ghp_` 开头的字符（**只显示这一次**）
+6. 复制那串 **`ghp_`** 开头的字符（**只显示这一次**，关掉就再也看不到）
 
 ### 第 2 步：交给 AI
-把 Token 和你的 GitHub 用户名发给 AI，它会：
-建仓库 → 推代码 → 开启 Pages → 告诉你网址。
+把 Token 发给 AI，它会：建仓库 → 推代码 → 开启 Pages → 告诉你网址。
 用完建议立刻到同一页面把这个 Token 删掉（Delete）。
 
 ### 或者你自己在终端跑
