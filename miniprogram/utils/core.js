@@ -122,7 +122,7 @@ function guessSubject(text) {
   return max >= 1 ? best : null;
 }
 function detectType(content) {
-  const c = String(content || '');
+  const c = toHalfWidth(String(content || ''));
   if (/(?:^|[\s.．、])(?:A|a|Ａ)\s*[.．、)].+B\s*[.．、)]/s.test(c) || /A\s*[.．、)][\s\S]{0,80}B\s*[.．、)]/.test(c)) return '选择题';
   if (/判断(题|对错)|正确的?[是打]√|打["“]√["”]|（\s*对错\s*）|\(\s*对错\s*\)/.test(c)) return '判断题';
   if (/（\s*）|\(\s*\)|__{2,}|＿{2,}/.test(c)) return '填空题';
@@ -137,7 +137,7 @@ function detectType(content) {
 }
 function extractOptions(content) {
   const opts = [];
-  const lines = String(content || '').split(/\r?\n/);
+  const lines = toHalfWidth(String(content || '')).split(/\r?\n/);
   for (const ln of lines) {
     const m = ln.trim().match(/^([A-Ha-h])\s*[.．、)]\s*(.+)$/);
     if (m && opts.length < 8) opts.push({ key: m[1].toUpperCase(), text: m[2].trim() });
@@ -145,13 +145,13 @@ function extractOptions(content) {
   if (opts.length >= 2) return opts;
   // 行内选项：A. xx B. xx C. xx（同一行）
   const inline = [];
-  const c = String(content || '');
+  const c = toHalfWidth(String(content || ''));
   const re = /([A-Ha-h])\s*[.．、)]/g;
   const marks = []; let mm;
   while ((mm = re.exec(c)) && marks.length < 10) marks.push({ key: mm[1].toUpperCase(), start: mm.index, end: re.lastIndex });
   for (let i = 0; i < marks.length; i++) {
     const end = i + 1 < marks.length ? marks[i + 1].start : c.length;
-    const text = c.slice(marks[i].end, end).replace(/[\s;；,，。、]+$/, '').trim();
+    const text = c.slice(marks[i].end, end).replace(/[\s;；,，。、(（]+$/, '').trim();
     if (text) inline.push({ key: marks[i].key, text });
   }
   if (inline.length >= 2) return inline.slice(0, 8);
@@ -192,6 +192,56 @@ function expandAnswerRange(t, put) {
   }
   return true;
 }
+/* 答案解析（增强版）：
+   ① 一行多区间：1-5 BBACA 6-10 DBCAD
+   ② 逐题式：1.B 2、C 3: A 4. went（数字+答案，一行可多对）
+   ③ 单个答案：B / √ / 对（put(null, v) 交给调用方决定归哪题）
+   inAnsMode=true 时接受单词/短语类答案（如英语填空 went、has gone to）；
+   否则只接受纯选项字母/判断符号，避免把题干吞成答案。 */
+function parseAnswerKey(t, put, inAnsMode) {
+  const s = String(t || '').trim();
+  if (!s || s.length > 200) return false;
+  let count = 0, m;
+  // ① 区间式（可多段）
+  const rangeRe = /(\d{1,3})\s*[-–—~至]\s*(\d{1,3})\s*[:：]?/g;
+  const ranges = [];
+  while ((m = rangeRe.exec(s))) ranges.push({ from: +m[1], to: +m[2], start: rangeRe.lastIndex, index: m.index });
+  for (let i = 0; i < ranges.length; i++) {
+    const from = ranges[i].from, to = ranges[i].to;
+    if (to < from || to - from > 60) continue;
+    const end = i + 1 < ranges.length ? ranges[i + 1].index : s.length;
+    const units = s.slice(ranges[i].start, end).match(/[A-Ha-h√×✓✗对错TF]/g);
+    if (!units) continue;
+    for (let n = from, u = 0; n <= to && u < units.length; n++, u++) {
+      let v = units[u];
+      if (v === '√' || v === '✓' || v === 'T') v = '对';
+      if (v === '×' || v === '✗' || v === 'F') v = '错';
+      put(n, v); count++;
+    }
+  }
+  if (count) return true;
+  // ② 逐题式
+  const pairRe = /(\d{1,3})\s*[.、．)）:：]\s*([^\d]+?)(?=\s*\d{1,3}\s*[.、．)）:：]|$)/g;
+  const pairs = [];
+  while ((m = pairRe.exec(s))) pairs.push([+m[1], m[2].trim()]);
+  if (pairs.length) {
+    let ok = 0;
+    for (const pair of pairs) {
+      const n = pair[0], v = pair[1];
+      if (!v) continue;
+      if (inAnsMode) {
+        if (v.length > 24 || /[。；？！，,]/.test(v)) continue;
+      } else {
+        if (!/^[A-Ha-h√×✓✗对错TF]{1,4}$/.test(v)) continue;
+      }
+      put(n, v); ok++;
+    }
+    if (ok) return true;
+  }
+  // ③ 单个答案（B / √ / 对）——仅在答案区内生效，避免误吞正文
+  if (inAnsMode && /^[A-Ha-h√×✓✗对错TF]{1,4}$/.test(s)) { put(null, s); return true; }
+  return false;
+}
 function parseUploadText(raw) {
   const lines = String(raw || '').split(/\r?\n/);
   const items = [];
@@ -199,39 +249,28 @@ function parseUploadText(raw) {
   let ansMode = null; // 'mine' | 'std'
   let cur = null;
   const pushItem = (qnum, text) => { cur = { qnum, lines: text ? [text] : [] }; items.push(cur); };
+  // 归位一条答案：n 为 null 表示「单个答案」，归到最近一道题
+  const putAns = (ans, v, n) => {
+    if (n == null) {
+      if (cur) ans[cur.qnum] = v;
+      else if (items.length) ans[items[items.length - 1].qnum] = v;
+    } else ans[n] = v;
+  };
 
   for (let rawLine of lines) {
     const t = rawLine.trim();
     if (!t) continue;
-    let m = t.match(/^(我的答案|学生答案|本人答案|做的答案)[:：](.*)$/);
-    if (m) {
-      ansMode = 'mine';
-      const rest = m[2].trim();
-      if (rest) {
-        const pm = rest.match(/^(\d{1,3})[.、．)）]?\s*(.+)$/);
-        if (!expandAnswerRange(rest, (n, v) => mineAns[n] = v) && pm && looksLikeAnswerLine(pm[2])) mineAns[parseInt(pm[1], 10)] = pm[2].trim();
-      }
-      continue;
+    const tp = toHalfWidth(t); // 仅用于匹配，内容仍保留原文
+    let m = tp.match(/^(我的答案|学生答案|本人答案|做的答案)[:：](.*)$/);
+    if (m) { ansMode = 'mine'; if (m[2].trim()) parseAnswerKey(m[2], (n, v) => putAns(mineAns, v, n), true); continue; }
+    m = tp.match(/^(标准答案|正确答案|参考答案|答案)[:：](.*)$/);
+    if (m) { ansMode = 'std'; if (m[2].trim()) parseAnswerKey(m[2], (n, v) => putAns(stdAns, v, n), true); continue; }
+    if (/^(我的答案|学生答案|标准答案|正确答案|参考答案)下?[面有]?[:：]?$/.test(tp)) {
+      ansMode = /标准|正确|参考/.test(tp) ? 'std' : 'mine'; continue;
     }
-    m = t.match(/^(标准答案|正确答案|参考答案|答案)[:：](.*)$/);
-    if (m) {
-      ansMode = 'std';
-      const rest = m[2].trim();
-      if (rest) {
-        const pm = rest.match(/^(\d{1,3})[.、．)）]?\s*(.+)$/);
-        if (!expandAnswerRange(rest, (n, v) => stdAns[n] = v) && pm && looksLikeAnswerLine(pm[2])) stdAns[parseInt(pm[1], 10)] = pm[2].trim();
-      }
-      continue;
-    }
-    if (/^(我的答案|学生答案|标准答案|正确答案|参考答案)下?[面有]?[:：]?$/.test(t)) {
-      ansMode = /标准|正确|参考/.test(t) ? 'std' : 'mine'; continue;
-    }
-    if (expandAnswerRange(t, (n, v) => { (ansMode === 'std' ? stdAns : mineAns)[n] = v; })) continue;
-    const qm = t.match(/^(\d{1,3})\s*[.、．)）]\s*(.*)$/);
-    const am = t.match(/^(\d{1,3})\s*[.、．)）]?\s*(.+)$/);
-    if (ansMode && am && looksLikeAnswerLine(am[2])) {
-      (ansMode === 'std' ? stdAns : mineAns)[parseInt(am[1], 10)] = am[2].trim(); continue;
-    }
+    // 答案行：支持多区间 / 逐题串 / 单个答案（未标注归属时默认按标准答案处理）
+    if (parseAnswerKey(tp, (n, v) => putAns(ansMode !== 'mine' ? stdAns : mineAns, v, n), !!ansMode)) continue;
+    const qm = tp.match(/^(\d{1,3})\s*[.、．)）]\s*(.*)$/);
     if (qm) { pushItem(parseInt(qm[1], 10), qm[2]); ansMode = null; continue; }
     if (cur) { cur.lines.push(t); continue; }
     if (t.length >= 6 && /[？?。：:＝=]/.test(t)) { pushItem(items.length + 1, t); ansMode = null; }
@@ -264,8 +303,11 @@ function gradeItem(item) {
     const a = extractChoiceLetters(sa), b = extractChoiceLetters(stdClean);
     if (!a.length) return { result: 'uncertain', reason: '学生答案中未识别到选项字母，需人工确认', score: null };
     if (!b.length) return { result: 'uncertain', reason: '标准答案格式无法识别，需人工确认', score: null };
-    const ok = a.join('') === b.join('');
-    return { result: ok ? 'correct' : 'wrong', reason: ok ? '' : ('选择了 ' + a.join('') + '，正确答案为 ' + b.join('')), score: ok ? 1 : 0 };
+    if (a.join('') === b.join('')) return { result: 'correct', reason: '', score: 1 };
+    // 错误说明尽量精确：带上选项原文内容
+    const optText = k => { const o = (item.options || []).find(o => o.key === k); return o && o.text ? String(o.text).slice(0, 24) : null; };
+    const desc = keys => keys.map(k => { const t = optText(k); return t ? k + '（' + t + '）' : k; }).join('、');
+    return { result: 'wrong', reason: '选择了 ' + desc(a) + '，正确答案为 ' + desc(b), score: 0 };
   }
   if (type === '判断题') {
     const a = judgeValue(sa), b = judgeValue(stdClean);
@@ -290,11 +332,17 @@ function gradeItem(item) {
           else { half++; reasons.push('第' + (i + 1) + '空数值正确但单位/写法与标准答案不同（“' + a + '” vs “' + b + '”）'); }
         } else { reasons.push('第' + (i + 1) + '空数值错误（' + a + ' ≠ ' + b + '）'); }
       } else {
-        const ra = norm(a), rb = norm(b);
-        if (ra === rb) full++;
-        else if (rb.includes(ra) && ra.length >= Math.max(1, rb.length * 0.5)) { half++; reasons.push('第' + (i + 1) + '空意思接近但不完整'); }
-        else if (simRatio(ra, rb) >= 0.8) { half++; reasons.push('第' + (i + 1) + '空接近正确答案（可能有错别字或单位问题）'); }
-        else reasons.push('第' + (i + 1) + '空与标准答案不符');
+        const ja = judgeValue(a), jb = judgeValue(b);
+        if (ja != null && jb != null) {
+          if (ja === jb) full++;
+          else reasons.push('第' + (i + 1) + '空判断错误（答“' + a + '”，正确为“' + b + '”）');
+        } else {
+          const ra = norm(a), rb = norm(b);
+          if (ra === rb) full++;
+          else if (rb.includes(ra) && ra.length >= Math.max(1, rb.length * 0.5)) { half++; reasons.push('第' + (i + 1) + '空意思接近但不完整（标准：' + b + '）'); }
+          else if (simRatio(ra, rb) >= 0.8) { half++; reasons.push('第' + (i + 1) + '空接近正确答案（可能有拼写错误；标准：' + b + '）'); }
+          else reasons.push('第' + (i + 1) + '空与标准答案不符（“' + a + '” ≠ “' + b + '”）');
+        }
       }
     }
     const score = (full + half * 0.5) / B.length;
@@ -388,6 +436,6 @@ module.exports = {
   uid, todayStr, addDays, fmtDate, fmtDT, masteryLevel, masteryOf, splitList,
   toHalfWidth, norm, judgeValue, extractChoiceLetters, parseNum, numEq, simRatio, jaccard,
   guessSubject, detectType, extractOptions, autoKeywords,
-  looksLikeAnswerLine, expandAnswerRange, parseUploadText,
+  looksLikeAnswerLine, expandAnswerRange, parseAnswerKey, parseUploadText,
   gradeItem, autoAnalysis, genSimilar
 };
