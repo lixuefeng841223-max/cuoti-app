@@ -1,5 +1,6 @@
 // 错题管家 PWA Service Worker
-const CACHE_NAME = 'cuoti-v1';
+// v2：首页改为「网络优先」，应用更新发布后刷新即可拿到新版，无需手动清缓存
+const CACHE_NAME = 'cuoti-v2';
 const ASSETS = [
   './',
   './index.html',
@@ -21,10 +22,32 @@ self.addEventListener('activate', e => {
   );
 });
 
+function isPageReq(req){
+  return req.mode === 'navigate' || /\/index\.html$/.test(new URL(req.url).pathname);
+}
+
 self.addEventListener('fetch', e => {
   const req = e.request;
   // 只处理同源 GET，其它直接走网络
   if (req.method !== 'GET' || new URL(req.url).origin !== self.location.origin) return;
+
+  // 页面/首页：网络优先，失败才用缓存 —— 保证更新能及时生效
+  if (isPageReq(req)) {
+    e.respondWith(
+      fetch(req).then(resp => {
+        if (resp && resp.status === 200) {
+          const clone = resp.clone();
+          caches.open(CACHE_NAME).then(c => c.put(req, clone));
+        }
+        return resp;
+      }).catch(() =>
+        caches.match(req).then(c => c || caches.match('./index.html'))
+      )
+    );
+    return;
+  }
+
+  // 其它静态资源：缓存优先（图标等基本不变）
   e.respondWith(
     caches.match(req).then(cached => {
       if (cached) return cached;
