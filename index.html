@@ -295,13 +295,17 @@ function toast(msg){ const t = $('#toast'); t.textContent = msg; t.classList.add
 /* ---------------- OCR 引擎：浏览器本地 Tesseract.js（懒加载） ----------------
    首次进入「上传」页时按需加载（约 30KB loader + 2MB wasm + 中英文模型按需缓存）
    模型缓存到浏览器 CacheStorage，离线可复用。
+   支持「识别语言」模式：auto=中英文 / zh=仅中文 / en=仅英文（英语手写强烈建议选 en，
+   中文模型遇到手写英文常输出乱码汉字）。识别前会做图像预处理（放大 + 自适应二值化），
+   并用「整页 / 单块」两种切图模式各跑一遍，取得分高者。
 */
-const OCR_LANGS = 'chi_sim+eng'; // 简体中文 + 英文，初一试卷混合场景够用
-let _tessWorker = null;
-let _tessLoading = null;
-async function ensureTesseract(onProgress){
-  if(_tessWorker && _tessLoading === null) return _tessWorker;
-  if(_tessLoading) return _tessLoading;
+const OCR_LANGS = 'chi_sim+eng';
+const OCR_LANG_MAP = { auto: OCR_LANGS, zh: 'chi_sim', en: 'eng' };
+const _tessWorkers = {};   // langs -> worker
+const _tessLoading = {};   // langs -> promise
+async function ensureTesseract(langs, onProgress){
+  if(_tessWorkers[langs]) return _tessWorkers[langs];
+  if(_tessLoading[langs]) return _tessLoading[langs];
   if(typeof Tesseract === 'undefined'){
     onProgress && onProgress({ status:'加载 OCR 引擎', progress:0.05 });
     await new Promise((res, rej) => {
@@ -311,9 +315,9 @@ async function ensureTesseract(onProgress){
       document.head.appendChild(s);
     });
   }
-  _tessLoading = (async () => {
+  _tessLoading[langs] = (async () => {
     onProgress && onProgress({ status:'加载 OCR 语言模型', progress:0.15 });
-    const w = await Tesseract.createWorker(OCR_LANGS, 1, {
+    const w = await Tesseract.createWorker(langs, 1, {
       logger: m => {
         if(!onProgress) return;
         const p = m.progress || 0;
@@ -321,17 +325,89 @@ async function ensureTesseract(onProgress){
         onProgress({ status: map[m.status] || m.status, progress: 0.2 + p * 0.8 });
       }
     });
-    _tessWorker = w;
-    _tessLoading = null;
+    _tessWorkers[langs] = w;
+    delete _tessLoading[langs];
     return w;
   })();
-  return _tessLoading;
+  return _tessLoading[langs];
 }
-async function ocrImage(dataUrl, onProgress){
-  const w = await ensureTesseract(onProgress);
-  onProgress && onProgress({ status:'识别中', progress:0 });
-  const { data } = await w.recognize(dataUrl);
-  return (data.text || '').trim();
+function loadImageEl(dataUrl){
+  return new Promise((res, rej) => {
+    const im = new Image();
+    im.onload = () => res(im);
+    im.onerror = () => rej(new Error('图片加载失败'));
+    im.src = dataUrl;
+  });
+}
+/* 图像预处理：放大到约 1800px 宽 + 灰度 + Bradley 自适应二值化。
+   手机拍的作业本光线不均、笔画细，直接识别效果差；二值化后细笔画清晰很多。 */
+async function preprocessForOcr(dataUrl){
+  const img = await loadImageEl(dataUrl);
+  let w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+  if(!w || !h) return dataUrl;
+  const scale = Math.min(3, Math.max(1, 1800 / w));
+  w = Math.round(w * scale); h = Math.round(h * scale);
+  const c = document.createElement('canvas'); c.width = w; c.height = h;
+  const ctx = c.getContext('2d');
+  ctx.imageSmoothingEnabled = true; ctx.imageSmoothingQuality = 'high';
+  ctx.drawImage(img, 0, 0, w, h);
+  const id = ctx.getImageData(0, 0, w, h), d = id.data;
+  const gray = new Uint8ClampedArray(w * h);
+  for(let i = 0; i < w * h; i++){ const j = i * 4; gray[i] = (d[j]*0.299 + d[j+1]*0.587 + d[j+2]*0.114) | 0; }
+  // 积分图
+  const W1 = w + 1;
+  const integ = new Float64Array(W1 * (h + 1));
+  for(let y = 0; y < h; y++){
+    let rowsum = 0;
+    for(let x = 0; x < w; x++){
+      rowsum += gray[y * w + x];
+      integ[(y + 1) * W1 + x + 1] = integ[y * W1 + x + 1] + rowsum;
+    }
+  }
+  const win = Math.max(15, Math.round(Math.min(w, h) / 24)) | 1;
+  const t = 0.14;
+  for(let y = 0; y < h; y++){
+    const y1 = Math.max(0, y - win), y2 = Math.min(h - 1, y + win);
+    for(let x = 0; x < w; x++){
+      const x1 = Math.max(0, x - win), x2 = Math.min(w - 1, x + win);
+      const cnt = (x2 - x1 + 1) * (y2 - y1 + 1);
+      const sum = integ[(y2+1)*W1 + x2+1] - integ[y1*W1 + x2+1] - integ[(y2+1)*W1 + x1+1] + integ[y1*W1 + x1+1];
+      const i0 = y * w + x, j = i0 * 4;
+      const on = gray[i0] >= sum * (1 - t) / cnt;
+      d[j] = d[j+1] = d[j+2] = on ? 255 : 0;
+      d[j+3] = 255;
+    }
+  }
+  ctx.putImageData(id, 0, 0);
+  return c.toDataURL('image/png');
+}
+/* 简单打分：英文单词 + 数字 + 汉字都算有效内容，越多越好 */
+function ocrScore(text){
+  const s = String(text || '');
+  return (s.match(/[A-Za-z]{2,}/g) || []).length
+       + (s.match(/[0-9]+/g) || []).length * 0.5
+       + (s.match(/[\u4e00-\u9fff]/g) || []).length * 0.6;
+}
+async function ocrImage(dataUrl, onProgress, langMode){
+  const langs = OCR_LANG_MAP[langMode] || OCR_LANGS;
+  const w = await ensureTesseract(langs, onProgress);
+  onProgress && onProgress({ status:'图像预处理', progress:0.05 });
+  const pre = await preprocessForOcr(dataUrl).catch(() => dataUrl);
+  // 两种切图模式各跑一遍：PSM 3 自动版面 / PSM 6 单一块（适合听写、单词列表）
+  const results = [];
+  for(let i = 0; i < 2; i++){
+    const psm = i === 0 ? '3' : '6';
+    try{
+      await w.setParameters({ tessedit_pageseg_mode: psm });
+      onProgress && onProgress({ status:'识别文字', progress: i === 0 ? 0.3 : 0.7 });
+      const { data } = await w.recognize(pre);
+      const text = (data.text || '').trim();
+      if(text) results.push({ text, score: ocrScore(text) });
+    }catch(e){ /* 单模式失败不影响另一个 */ }
+  }
+  if(!results.length) throw new Error('未能识别出文字');
+  results.sort((a, b) => b.score - a.score);
+  return results[0].text;
 }
 
 /* ---------------- 演示识别（无 OCR 引擎时使用，给用户走通流程） ----------------*/
@@ -348,6 +424,7 @@ async function demoOcr(subject){
 
 /* ---------------- OCR 引擎选择弹窗 ----------------*/
 function openOcrEngineModal(){
+  const langBtn = (v, label) => '<button class="btn ghost block" data-lang="' + v + '">' + (uploadState.ocrLang===v?'✓ ':'') + label + '</button>';
   const root = openModal(
     '<div class="modal-head"><h3>🔍 图片识别引擎</h3><button class="icon-btn x" data-close>✕</button></div>' +
     '<div style="font-size:13px;color:var(--muted);margin-bottom:10px">「拍照 / 图片上传」用引擎把图片转成文字，再走题号/选项/答案解析流程。</div>' +
@@ -356,11 +433,28 @@ function openOcrEngineModal(){
       '<button class="btn ghost block" data-engine="local">' + (uploadState.ocrEngine==='local'?'✓ ':'') + '📱 本地 OCR（中英文 Tesseract）</button>' +
       '<button class="btn ghost block" data-engine="demo">' + (uploadState.ocrEngine==='demo'?'✓ ':'') + '🎭 演示模式（无 OCR）</button>' +
     '</div>' +
-    '<div class="help-note" style="margin-top:12px"><b>说明</b><br>· <b>智能识别</b>：优先调用本地 OCR（首次约 12MB 模型下载，离线复用），失败自动回退演示。<br>· <b>本地 OCR</b>：纯浏览器跑（数据不出设备、零成本），适合清晰印刷体；手写识别率一般。<br>· <b>演示模式</b>：不做真实识别，给一份示范文本走通流程，方便教学演示。</div>');
+    '<div style="margin-top:14px;font-size:13px;font-weight:600">识别语言</div>' +
+    '<div class="btn-row" style="flex-direction:column;gap:8px;margin-top:8px">' +
+      langBtn('auto', '🌐 中英文混合（默认）') +
+      langBtn('en', '🇬🇧 仅英文 —— 英语手写/听写强烈推荐') +
+      langBtn('zh', '🇨🇳 仅中文') +
+    '</div>' +
+    '<div class="help-note" style="margin-top:12px"><b>说明</b><br>' +
+      '· <b>智能识别 / 本地 OCR</b>：浏览器本地运行（数据不出设备、零成本），识别前会自动做「放大 + 二值化」图像增强，并用两种版面模式各跑一遍取效果好的。<br>' +
+      '· <b>识别语言</b>：英语手写务必选「仅英文」——中文模型遇到手写英文字母常输出乱码汉字（如把 "look" 认成 "风:"）。<br>' +
+      '· <b>手写能力边界</b>：本地 OCR 对印刷体效果好，对连笔手写识别率有限。拍清晰、拍正、字写大能明显改善；识别不准时可直接在确认页「题目内容」里手动修正，或改用「文字输入」粘贴。<br>' +
+      '· <b>演示模式</b>：不做真实识别，给一份示范文本走通流程，方便教学演示。</div>');
   $$('[data-engine]', root).forEach(b => b.addEventListener('click', () => {
     uploadState.ocrEngine = b.getAttribute('data-engine');
+    _lsSet('cuoti_ocr_engine', uploadState.ocrEngine);
     closeModal(); renderUpload();
     toast('已切换为 ' + ({auto:'智能识别',local:'本地 OCR',demo:'演示模式'})[uploadState.ocrEngine]);
+  }));
+  $$('[data-lang]', root).forEach(b => b.addEventListener('click', () => {
+    uploadState.ocrLang = b.getAttribute('data-lang');
+    _lsSet('cuoti_ocr_lang', uploadState.ocrLang);
+    openOcrEngineModal();
+    toast('识别语言：' + ({auto:'中英文',en:'英文（英语手写推荐）',zh:'中文'})[uploadState.ocrLang]);
   }));
 }
 
@@ -1523,8 +1617,13 @@ function bindQCards(scope){
 }
 
 /* ---------------- 视图：上传 ---------------- */
-const uploadState = { images: [], items: [], step: 1, subject: 'math', guessedSubject: null, mode: 'photo', ocrEngine: 'auto' };
-// ocrEngine: 'auto' = 智能选择(优先本地 OCR,失败回退演示) | 'local' = 强制本地 OCR | 'demo' = 演示模式
+const _lsGet = (k, def) => { try{ return localStorage.getItem(k) || def; }catch(e){ return def; } };
+const _lsSet = (k, v) => { try{ localStorage.setItem(k, v); }catch(e){} };
+const uploadState = {
+  images: [], items: [], step: 1, subject: 'math', guessedSubject: null, mode: 'photo',
+  ocrEngine: _lsGet('cuoti_ocr_engine', 'auto'), // 'auto'=智能(优先本地OCR,失败回退演示) | 'local'=强制本地 | 'demo'=演示
+  ocrLang: _lsGet('cuoti_ocr_lang', 'auto')      // 'auto'=中英文 | 'zh'=仅中文 | 'en'=仅英文(英语手写推荐)
+};
 function renderUpload(){
   const view = $('#view');
   const engineLabel = ({auto:'🤖 智能识别', local:'🔍 本地 OCR', demo:'🎭 演示模式'})[uploadState.ocrEngine] || '🤖 智能识别';
@@ -1540,7 +1639,13 @@ function renderUpload(){
         '<button data-m="photo" class="' + (uploadState.mode==='photo'?'on':'') + '">拍照 / 图片上传</button>' +
         '<button data-m="text" class="' + (uploadState.mode==='text'?'on':'') + '">文字输入</button>' +
       '</div>' +
-      (uploadState.mode==='photo' ? '<div style="margin-top:10px;font-size:13px;color:var(--muted)">识别引擎：<b>' + engineLabel + '</b>  <a href="#" id="up-engine-help" style="font-size:12px">切换/了解</a></div>' : '') +
+      (uploadState.mode==='photo' ? '<div style="margin-top:10px;font-size:13px;color:var(--muted)">识别引擎：<b>' + engineLabel + '</b>  <a href="#" id="up-engine-help" style="font-size:12px">切换/了解</a></div>' +
+        '<div style="margin-top:8px;font-size:13px;color:var(--muted);display:flex;align-items:center;gap:8px;flex-wrap:wrap">识别语言：' +
+          '<span class="seg" id="up-ocr-lang" style="display:inline-flex">' +
+            [['auto','中英文'],['en','英文'],['zh','中文']].map(p => '<button data-l="' + p[0] + '" style="font-size:12px;padding:4px 10px" class="' + (uploadState.ocrLang===p[0]?'on':'') + '">' + p[1] + '</button>').join('') +
+          '</span>' +
+          (uploadState.ocrLang==='en' ? '<span style="font-size:12px">✅ 英语手写推荐</span>' : '') +
+        '</div>' : '') +
       '<div id="up-body" style="margin-top:12px"></div>' +
     '</div>' +
     '<div id="up-items"></div>' +
@@ -1554,6 +1659,12 @@ function renderUpload(){
   }));
   const engHelp = $('#up-engine-help');
   if(engHelp) engHelp.addEventListener('click', e => { e.preventDefault(); openOcrEngineModal(); });
+  $$('#up-ocr-lang button').forEach(b => b.addEventListener('click', () => {
+    uploadState.ocrLang = b.getAttribute('data-l');
+    _lsSet('cuoti_ocr_lang', uploadState.ocrLang);
+    renderUpload();
+    toast('识别语言：' + ({auto:'中英文',en:'英文（英语手写推荐）',zh:'中文'})[uploadState.ocrLang]);
+  }));
   renderUploadBody();
 }
 function renderUploadBody(){
@@ -1562,6 +1673,7 @@ function renderUploadBody(){
     body.innerHTML =
       '<label class="upzone" id="upzone" for="gallery-input"><div class="big">📸</div><b>点击拍照或选择图片</b>' +
       '<div style="font-size:12px;margin-top:4px">支持题目截图、试卷照片、作业照片、手写答案<br>（手机将调起相机，电脑可拖拽或选择文件）</div></label>' +
+      '<div class="help-note" style="margin-top:8px">✍️ <b>手写识别小技巧</b>：字写大一点、拍正、光线足、尽量填满画面；<b>英语听写请把识别语言切到「英文」</b>（切中文模型会把手写英文认成乱码汉字）。识别不准时可直接在下方「题目内容」里手动改，改动只影响本题。</div>' +
       '<input type="file" id="camera-input" accept="image/*" capture="environment" style="display:none">' +
       '<input type="file" id="gallery-input" accept="image/*" multiple style="display:none">' +
       '<div class="btn-row"><label class="btn ghost sm" for="camera-input">📷 拍照</label>' +
@@ -1634,7 +1746,7 @@ async function startRecognition(){
             if(btn) btn.textContent = '🔍 识别第 ' + (i+1) + '/' + images.length + ' 张…';
             const t = await ocrImage(im.data, m => {
               if(btn && m && m.progress != null) btn.textContent = '🔍 第 ' + (i+1) + ' 张：' + (m.status||'') + ' ' + Math.round(m.progress*100) + '%';
-            });
+            }, uploadState.ocrLang);
             parts.push(t);
           }
           ocrText = parts.join('\n\n');
